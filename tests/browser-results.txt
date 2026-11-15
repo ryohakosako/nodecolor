@@ -1,6 +1,0 @@
-ブラウザ内の機能テスト
-PASS 画像Fileのデコードと透明部分の白合成
-PASS OBJ File読込と3D描画への色適用
-PASS 画像・OBJ・保存HEXを含むJSON往復
-PASS IndexedDBに画像・OBJを保存して復元（隔離ストア）
-PASS ノード全体のPNG生成と画像画素の保持
