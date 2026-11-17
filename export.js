@@ -14,7 +14,7 @@ async function createCanvas(scene,options){await document.fonts.ready;const {car
  const palette={light:'#F4D199',hub:'#85CCB8',bundle:'#F4D199',key:'#F4D199',environment:'#8EB6E2',reflection:'#D99D8F',highlight:'#E4D8FA',background:'#9BBDB0'};
  for(const edge of scene.edges){const a=portPoint(edge.from,'output',edge.slot),b=portPoint(edge.to,'input',edge.slot);if(!a||!b)continue;const bend=Math.max(60,Math.abs(b.x-a.x)/2);const source=scene.nodes.find(n=>n.id===edge.from);ctx.strokeStyle=palette[source?.type==='lighting'?source.kind:'hub']||palette.bundle;ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.bezierCurveTo(a.x+bend,a.y,b.x-bend,b.y,b.x,b.y);ctx.stroke();}
  for(const {node,card}of cards){
-  const rect=card.getBoundingClientRect(),unit=scene.view.scale;ctx.fillStyle='#24272f';ctx.strokeStyle='#474d5d';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect(node.x,node.y,card.offsetWidth,card.offsetHeight,10);ctx.fill();ctx.stroke();
+  const rect=card.getBoundingClientRect(),unit=scene.view.scale;ctx.fillStyle='#24272f';ctx.strokeStyle=getComputedStyle(card).borderTopColor||'#474d5d';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect(node.x,node.y,card.offsetWidth,card.offsetHeight,10);ctx.fill();ctx.stroke();
   for(const element of card.querySelectorAll('*')){
    if(!element.getClientRects().length||element.hidden)continue;const style=getComputedStyle(element);if(style.display==='none'||style.visibility==='hidden')continue;
    const r=element.getBoundingClientRect(),x=node.x+(r.left-rect.left)/unit,y=node.y+(r.top-rect.top)/unit,width=r.width/unit,height=r.height/unit;
@@ -26,6 +26,7 @@ async function createCanvas(scene,options){await document.fonts.ready;const {car
     if(element.type==='color')ctx.fillStyle=element.value;
     ctx.fillRect(x,y,width,height);
    }
+   if(element.type==='checkbox'){ctx.strokeStyle=style.color;ctx.strokeRect(x+1,y+1,width-2,height-2);if(element.checked){ctx.fillStyle=style.accentColor;ctx.fillRect(x+4,y+4,width-8,height-8);}continue;}
    if(element.type==='range'){
     const t=(Number(element.value)-Number(element.min))/(Number(element.max)-Number(element.min));ctx.fillStyle='#484e5c';ctx.fillRect(x,y+height/2-2,width,4);ctx.fillStyle=style.accentColor;ctx.fillRect(x,y+height/2-2,width*t,4);continue;
    }
