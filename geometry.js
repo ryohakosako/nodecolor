@@ -33,9 +33,9 @@ function sphere(){const triangles=[],lat=20,lon=28;const p=(i,j)=>{const a=i/lat
 function cube(){return parseOBJ('v -.6 -.6 -.6\nv .6 -.6 -.6\nv .6 .6 -.6\nv -.6 .6 -.6\nv -.6 -.6 .6\nv .6 -.6 .6\nv .6 .6 .6\nv -.6 .6 .6\nf 1 4 3 2\nf 5 6 7 8\nf 1 5 8 4\nf 2 3 7 6\nf 4 8 7 3\nf 1 2 6 5');}
 function flat(){const p=[[-.75,-.75,0],[.75,-.75,0],[.75,.75,0],[-.75,.75,0]],n=[[0,0,1],[0,0,1],[0,0,1]];return {triangles:[{p:[p[0],p[1],p[2]],n},{p:[p[0],p[2],p[3]],n}]};}
 function rotate(v,yaw,pitch){const a=yaw*Math.PI/180,b=pitch*Math.PI/180,x=v[0]*Math.cos(a)+v[2]*Math.sin(a),z=-v[0]*Math.sin(a)+v[2]*Math.cos(a);return [x,v[1]*Math.cos(b)-z*Math.sin(b),v[1]*Math.sin(b)+z*Math.cos(b)];}
-function rasterize(mesh,width,height,{yaw=0,pitch=0,shade=()=>[.8,.8,.8],background=[.15,.17,.2]}={}){
+function rasterize(mesh,width,height,{yaw=0,pitch=0,zoom=1,shade=()=>[.8,.8,.8],background=[.15,.17,.2]}={}){
  const radius=Math.max(.001,...mesh.triangles.map(t=>Math.max(...t.p.map(v=>Math.hypot(...v)))));
- const data=new Uint8ClampedArray(width*height*4),depth=new Float32Array(width*height).fill(-Infinity),scale=Math.min(width,height)*.43/radius;
+ const data=new Uint8ClampedArray(width*height*4),depth=new Float32Array(width*height).fill(-Infinity),scale=Math.min(width,height)*.43/radius*Math.max(.25,Math.min(4,zoom));
  for(let i=0;i<data.length;i+=4){data[i]=background[0]*255;data[i+1]=background[1]*255;data[i+2]=background[2]*255;data[i+3]=255;}
  for(const triangle of mesh.triangles){
   const p=triangle.p.map(v=>rotate(v,yaw,pitch)),n=triangle.n.map(v=>normalize(rotate(v,yaw,pitch))),screen=p.map(v=>[width/2+v[0]*scale,height/2-v[1]*scale,v[2]]);

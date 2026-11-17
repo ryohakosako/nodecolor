@@ -1,81 +1,33 @@
-/* Version 3 scene model. Media and OBJ source stay in the project document. */
+/* v5: individual lights, acyclic hubs, unique-source composition and portable assets. */
 (function(root){
 'use strict';
 const G=typeof module!=='undefined'?require('./geometry.js'):root.Geometry;
-const Legacy=typeof module!=='undefined'?require('./legacy-model.js'):root.LegacyColorModel;
-const slots=['key','environment','reflection','highlight','background'];
-const labels={base:'固有色',lighting:'照明',image:'画像',bundle:'照明一式',key:'主光源',environment:'環境光',reflection:'反射光',highlight:'ハイライト',background:'背景'};
-const normalizeHex=v=>typeof v==='string'&&/^#?[\da-f]{6}$/i.test(v.trim())?'#'+v.trim().replace(/^#/,'').toUpperCase():null;
-const isHex=v=>typeof v==='string'&&/^#[\da-f]{6}$/i.test(v);
-const channels=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255);
-const hex=rgb=>'#'+rgb.map(c=>Math.round(Math.max(0,Math.min(1,c))*255).toString(16).padStart(2,'0')).join('').toUpperCase();
-const linear=c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4;
-const srgb=c=>c<=.0031308?12.92*c:1.055*c**(1/2.4)-.055;
-const angle=a=>((a%360)+360)%360;
-function defaults(){const lights={key:{color:'#FFE2AD',strength:.8,azimuth:315,elevation:40},environment:{color:'#829DC6',strength:.35},reflection:{color:'#DB9C7D',strength:.35,azimuth:70,elevation:-30},highlight:{color:'#FFF4E0',strength:.45,azimuth:315,elevation:40},background:{color:'#30343F'}};for(const light of Object.values(lights))light.enabled=true;return lights;}
-function base(id,name,color,x,y){return {id,type:'base',name,color,x,y,shape:'sphere',rotation:{yaw:0,pitch:0},obj:null,savedColors:[]};}
-function sample(){return {version:4,exportScale:1,nodes:[{id:'lighting',type:'lighting',name:'照明',x:30,y:30,lights:defaults()},base('skin','肌','#F2C7AB',405,30),{...base('hair','髪','#49405C',795,30),shape:'cube',rotation:{yaw:30,pitch:18}},base('cloth','服','#6E9BA4',1185,30),{id:'image',type:'image',name:'参考画像',x:405,y:715,src:null}],edges:['skin','hair','cloth'].map(to=>({from:'lighting',to,slot:'bundle'})),view:{x:20,y:20,scale:.85}};}
-function source(state,node,slot){const e=state.edges.find(e=>e.to===node.id&&(e.slot==='bundle'||e.slot===slot));const light=e&&state.nodes.find(n=>n.id===e.from)?.lights[slot];return light?.enabled===false?undefined:light;}
-function direction(light){const a=(light.azimuth||0)*Math.PI/180,e=(light.elevation||0)*Math.PI/180;return [Math.sin(a)*Math.cos(e),Math.sin(e),Math.cos(a)*Math.cos(e)];}
-function shader(state,node){
- const key=source(state,node,'key')||{color:'#FFFFFF',strength:0,azimuth:315,elevation:40},env=source(state,node,'environment')||{color:'#FFFFFF',strength:0},ref=source(state,node,'reflection'),high=source(state,node,'highlight');
- const b=channels(node.color).map(linear),kc=channels(key.color).map(linear),ec=channels(env.color).map(linear),rc=channels(ref?.color||'#000000').map(linear),hc=channels(high?.color||'#000000').map(linear),kd=direction(key),rd=ref?direction(ref):[0,0,0],hd=high?G.normalize(direction(high).map((v,i)=>v+(i===2?1:0))):[0,0,1];
- return normal=>{const n=G.normalize(normal),diff=Math.max(0,G.dot(n,kd)),bounce=Math.max(0,G.dot(n,rd)),spec=high&&Math.hypot(...direction(high).map((v,i)=>v+(i===2?1:0)))>1e-8?Math.max(0,G.dot(n,hd))**40:0;return b.map((c,i)=>Math.max(0,Math.min(1,srgb(c*(env.strength*.55*ec[i]+key.strength*diff*1.3*kc[i]+(ref?.strength||0)*bounce*.7*rc[i])+(high?.strength||0)*spec*.65*hc[i]))));};
-}
-function gradientColor(state,node,t){const key=source(state,node,'key')||defaults().key,L=direction(key),axis=Math.abs(L[1])<.9?[0,1,0]:[1,0,0],dot=G.dot(L,axis),perp=G.normalize(axis.map((v,i)=>v-dot*L[i])),c=2*Math.max(0,Math.min(1,t))-1;return hex(shader(state,node)(L.map((v,i)=>v*c+perp[i]*Math.sqrt(Math.max(0,1-c*c)))));}
-function migrate(data){
- const old=Legacy.validate(data),lists=Object.fromEntries(slots.map(s=>[s,old.nodes.filter(n=>n.type===s)])),count=Math.max(0,...slots.map(s=>lists[s].length)),nodes=[],mapping=new Map(),used=new Set(old.nodes.map(n=>n.id));
- for(let i=0;i<count;i++){
-  let id='lighting-migrated-'+i;while(used.has(id))id+='-new';used.add(id);const lights=defaults();
-  for(const slot of slots){const n=lists[slot][i];if(n){lights[slot]={...lights[slot],color:n.color,...(slot==='background'?{}:{strength:n.strength}),...(slot==='key'?{azimuth:angle(n.angle),elevation:40}:{})};mapping.set(n.id,id);}}
-  nodes.push({id,type:'lighting',name:i?'照明 '+(i+1):'照明',x:30+i*350,y:30,lights});
- }
- let index=0;for(const n of old.nodes.filter(n=>n.type==='base')){nodes.push({...base(n.id,n.name,n.color,55+count*350+index%3*390,30+Math.floor(index/3)*690),shape:n.shape,rotation:{yaw:n.shape==='cube'?30:0,pitch:n.shape==='cube'?18:0}});index++;}
- const edges=old.edges.map(e=>({from:mapping.get(e.from),to:e.to,slot:old.nodes.find(n=>n.id===e.from).type}));
- return {version:3,nodes,edges,view:old.view};
-}
-function upgrade(data){
- const next=JSON.parse(JSON.stringify(data));next.version=4;next.exportScale=1;
- for(const n of next.nodes)if(n.type==='lighting')for(const l of Object.values(n.lights))l.enabled=true;
- const edges=[],groups=new Map();
- for(const n of next.nodes.filter(n=>n.type==='base')){
-  const links=next.edges.filter(e=>e.to===n.id);if(!links.length)continue;
-  const signature=JSON.stringify(slots.map(slot=>links.find(e=>e.slot===slot)?.from||null));let id=groups.get(signature);
-  if(!id){const from=links[0].from,original=next.nodes.find(v=>v.id===from);const all=slots.every(slot=>links.some(e=>e.slot===slot&&e.from===from));
-   if(all)id=from;else{ id='lighting-bundle-'+groups.size;while(next.nodes.some(v=>v.id===id))id+='-new';const lights=defaults();
-    for(const slot of slots){const link=links.find(e=>e.slot===slot),src=link&&next.nodes.find(v=>v.id===link.from);lights[slot]=src?{...src.lights[slot]}:{...lights[slot],enabled:false};}
-    next.nodes.push({id,type:'lighting',name:original.name+'（移行）',x:original.x,y:original.y+850+groups.size*40,lights});
-   }groups.set(signature,id);
-  }edges.push({from:id,to:n.id,slot:'bundle'});
- }next.edges=edges;return next;
-}
-function validate(data){
- if(data?.version===1||data?.version===2)return validate(migrate(data));
- if(data?.version===3)return validate(upgrade(data));
- if(!data||data.version!==4||!Array.isArray(data.nodes)||!Array.isArray(data.edges)||data.nodes.length>200||data.edges.length>500)throw Error('未対応の形式か、ノード数が上限を超えています。');
- const ids=new Set(),finite=(n,min,max)=>Number.isFinite(n)&&n>=min&&n<=max;
- const nodes=data.nodes.map(n=>{
-  if(!n||typeof n.id!=='string'||!n.id||n.id.length>100||ids.has(n.id)||!['base','lighting','image'].includes(n.type)||typeof n.name!=='string'||n.name.length>60||![n.x,n.y].every(v=>finite(v,-100000,100000)))throw Error('ノードの値が不正です。');
-  ids.add(n.id);const out={id:n.id,type:n.type,name:n.name,x:n.x,y:n.y};
-  if(n.type==='lighting'){
-   out.lights={};for(const slot of slots){const light=n.lights?.[slot];if(!light||!isHex(light.color))throw Error('照明の色が不正です。');if(typeof light.enabled!=='boolean')throw Error('照明のオン・オフが不正です。');const value={color:light.color.toUpperCase(),enabled:light.enabled};
-    if(slot!=='background'){if(!finite(light.strength,0,1))throw Error('照明強度が不正です。');value.strength=light.strength;}
-    if(!['environment','background'].includes(slot)){if(!finite(light.azimuth,0,360)||!finite(light.elevation,-90,90))throw Error('照明の方位・上下角が不正です。');value.azimuth=light.azimuth;value.elevation=light.elevation;}
-    if(light.hemisphere!==undefined){if(!['front','back'].includes(light.hemisphere))throw Error('光の手前・奥が不正です。');value.hemisphere=light.hemisphere;}out.lights[slot]=value;
-   }
-  }else if(n.type==='base'){
-   if(!isHex(n.color)||!['sphere','cube','flat','obj'].includes(n.shape)||!finite(n.rotation?.yaw,0,360)||!finite(n.rotation?.pitch,-90,90)||!Array.isArray(n.savedColors)||n.savedColors.length>32||!n.savedColors.every(isHex))throw Error('固有色・形状・保存色が不正です。');
-   out.color=n.color.toUpperCase();out.shape=n.shape;out.rotation={yaw:n.rotation.yaw,pitch:n.rotation.pitch};out.savedColors=[...new Set(n.savedColors.map(c=>c.toUpperCase()))];out.obj=null;
-   if(n.obj!==null){if(!n.obj||typeof n.obj.name!=='string'||n.obj.name.length>160||typeof n.obj.text!=='string')throw Error('OBJデータが不正です。');G.parseOBJ(n.obj.text);out.obj={name:n.obj.name,text:n.obj.text};}
-   if(n.shape==='obj'&&!out.obj)throw Error('OBJ形状のデータがありません。');
-  }else{
-   if(n.src!==null&&(typeof n.src!=='string'||n.src.length>2500000||!/^data:image\/(png|jpeg);base64,[a-zA-Z0-9+/=]+$/.test(n.src)))throw Error('画像データが不正です。');out.src=n.src;
-  }
-  return out;
- });
- const targets=new Set();const edges=data.edges.map(e=>{if(!e||e.slot!=='bundle'||!nodes.some(n=>n.id===e.from&&n.type==='lighting')||!nodes.some(n=>n.id===e.to&&n.type==='base')||targets.has(e.to+':'+e.slot))throw Error('接続が不正です。');targets.add(e.to+':'+e.slot);return {from:e.from,to:e.to,slot:e.slot};});
- const v=data.view;if(!v||!finite(v.x,-100000,100000)||!finite(v.y,-100000,100000)||!finite(v.scale,.25,2))throw Error('視点が不正です。');
- const exportScale=data.exportScale??1;if(!finite(exportScale,.25,4))throw Error('PNG倍率が不正です。');return {version:4,nodes,edges,view:{x:v.x,y:v.y,scale:v.scale},exportScale};
-}
-const api={slots,labels,normalizeHex,isHex,channels,hex,angle,defaults,base,sample,source,direction,shader,gradientColor,validate};if(typeof module!=='undefined')module.exports=api;else root.ColorModel=api;
+const V4=typeof module!=='undefined'?require('./compat-v4.js'):root.ColorModelV4;
+const kinds=['light','environment','highlight','background'];
+const labels={base:'固有色',lighting:'照明',hub:'HUB',image:'画像',bundle:'照明',light:'光源',environment:'環境光',highlight:'ハイライト',background:'背景'};
+const {normalizeHex,isHex,channels,hex,angle,direction,defaultRotation}=V4;
+const linear=c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4,srgb=c=>c<=.0031308?12.92*c:1.055*c**(1/2.4)-.055;
+function defaults(){return {light:{color:'#FFE2AD',strength:.8,azimuth:315,elevation:40,enabled:true,hemisphere:'front'},environment:{color:'#829DC6',strength:.35,enabled:true},highlight:{color:'#FFF4E0',strength:.45,azimuth:315,elevation:40,enabled:true,hemisphere:'front'},background:{color:'#30343F',enabled:true}};}
+function lighting(id,name,x,y,kind='light'){return {id,type:'lighting',name,x,y,kind,settings:defaults()};}
+function base(id,name,color,x,y){return {...V4.base(id,name,color,x,y),objectScale:1,initialRotation:{yaw:0,pitch:0}};}
+function sample(){const main=lighting('main','主光源',30,30),reflection=lighting('reflection','反射光',420,30),environment=lighting('environment','環境光',30,620,'environment'),highlight=lighting('highlight','ハイライト',420,620,'highlight'),background=lighting('background','背景',30,910,'background');Object.assign(reflection.settings.light,{color:'#DB9C7D',strength:.35,azimuth:70,elevation:-30});return {version:5,exportScale:1,nodes:[main,reflection,environment,highlight,background,{id:'hub',type:'hub',name:'照明HUB',x:830,y:30},base('skin','肌','#F2C7AB',1110,30),{...base('hair','髪','#49405C',1570,30),shape:'cube',rotation:{yaw:30,pitch:18},initialRotation:{yaw:30,pitch:18}},base('cloth','服','#6E9BA4',1110,640),{id:'image',type:'image',name:'参考画像',x:1570,y:640,src:null}],edges:[...['main','reflection','environment','highlight','background'].map(from=>({from,to:'hub',slot:'bundle'})),...['skin','hair','cloth'].map(to=>({from:'hub',to,slot:'bundle'}))],view:{x:20,y:20,scale:.75}};}
+function canConnect(scene,from,to){const a=scene.nodes.find(n=>n.id===from),b=scene.nodes.find(n=>n.id===to);if(!a||!b)return {ok:false,reason:'接続先がありません。'};if(!['lighting','hub'].includes(a.type)||!['base','hub'].includes(b.type))return {ok:false,reason:'照明/HUBの出力から、固有色/HUBの入力へ接続してください。'};if(from===to)return {ok:false,reason:'自分自身には接続できません。'};if(scene.edges.some(e=>e.from===from&&e.to===to))return {ok:false,reason:'すでに接続されています。'};const seen=new Set(),stack=[to],outgoing=new Map();for(const e of scene.edges){if(!outgoing.has(e.from))outgoing.set(e.from,[]);outgoing.get(e.from).push(e.to);}while(stack.length){const id=stack.pop();if(id===from)return {ok:false,reason:'循環する接続はできません。'};if(seen.has(id))continue;seen.add(id);stack.push(...(outgoing.get(id)||[]));}if(scene.edges.length>=5000)return {ok:false,reason:'接続数の上限です。'};return {ok:true};}
+function connectNodes(scene,from,to){const check=canConnect(scene,from,to);if(!check.ok)throw Error(check.reason);scene.edges.push({from,to,slot:'bundle'});}
+function collectLights(scene,target){const nodeMap=new Map(scene.nodes.map(n=>[n.id,n])),incoming=new Map();for(const e of scene.edges){if(!incoming.has(e.to))incoming.set(e.to,[]);incoming.get(e.to).push(e.from);}const stack=[...(incoming.get(typeof target==='string'?target:target.id)||[])].reverse(),visitedHubs=new Set(),visitedLights=new Set(),result=[];while(stack.length){const id=stack.pop(),n=nodeMap.get(id);if(!n)continue;if(n.type==='lighting'&&!visitedLights.has(id)){visitedLights.add(id);result.push(n);}else if(n.type==='hub'&&!visitedHubs.has(id)){visitedHubs.add(id);stack.push(...[...(incoming.get(id)||[])].reverse());}}return result;}
+function source(scene,node,kind){const n=collectLights(scene,node).find(n=>n.kind===kind&&n.settings[kind].enabled);return n?.settings[kind];}
+function backgroundColor(scene,node){return source(scene,node,'background')?.color||'#30343F';}
+function shader(scene,node){const b=channels(node.color).map(linear),lights=collectLights(scene,node).filter(n=>n.settings[n.kind].enabled&&n.kind!=='background').map(n=>{const l=n.settings[n.kind],d=['light','highlight'].includes(n.kind)?direction(l):[0,0,0],half=n.kind==='highlight'?G.normalize(d.map((v,i)=>v+(i===2?1:0))):null;return {kind:n.kind,color:channels(l.color).map(linear),strength:l.strength,d,half,validSpec:Math.hypot(...d.map((v,i)=>v+(i===2?1:0)))>1e-8};});return normal=>{const n=G.normalize(normal),rgb=[0,0,0];for(const light of lights){let factor;if(light.kind==='environment')factor=.55*light.strength;else if(light.kind==='light')factor=1.3*light.strength*Math.max(0,G.dot(n,light.d));else factor=light.validSpec ? .65*light.strength*Math.max(0,G.dot(n,light.half))**40:0;for(let i=0;i<3;i++)rgb[i]+=light.color[i]*factor*(light.kind==='highlight'?1:b[i]);}return rgb.map(v=>Math.max(0,Math.min(1,srgb(v))));};}
+function gradientColor(scene,node,t){const l=source(scene,node,'light')||defaults().light,L=direction(l),axis=Math.abs(L[1])<.9?[0,1,0]:[1,0,0],d=G.dot(L,axis),perp=G.normalize(axis.map((v,i)=>v-d*L[i])),c=2*Math.max(0,Math.min(1,t))-1;return hex(shader(scene,node)(L.map((v,i)=>v*c+perp[i]*Math.sqrt(Math.max(0,1-c*c)))));}
+function removeNode(scene,id){scene.nodes=scene.nodes.filter(n=>n.id!==id);scene.edges=scene.edges.filter(e=>e.from!==id&&e.to!==id);}
+function duplicateNode(scene,id,newId){if(scene.nodes.length>=100)throw Error('新しいノードは100個までです。');const original=scene.nodes.find(n=>n.id===id);if(!original||typeof newId!=='string'||!newId||newId.length>100||scene.nodes.some(n=>n.id===newId))throw Error('複製元またはIDが不正です。');const copy=JSON.parse(JSON.stringify(original));copy.id=newId;copy.x=copy.x>99964?copy.x-36:copy.x+36;copy.y=copy.y>99964?copy.y-36:copy.y+36;scene.nodes.push(copy);return copy;}
+function migrate(data){const old=V4.validate(data),nodes=[],edges=[],used=new Set(old.nodes.map(n=>n.id));let counter=0;const uid=()=>{let id;do{id='v5-light-'+counter++;}while(used.has(id));used.add(id);return id;};for(const n of old.nodes){if(n.type!=='lighting'){nodes.push(JSON.parse(JSON.stringify(n)));continue;}nodes.push({id:n.id,type:'hub',name:(n.name+' HUB').slice(0,60),x:n.x,y:n.y});const entries=[['key','light','主光源'],['reflection','light','反射光'],['environment','environment','環境光'],['highlight','highlight','ハイライト'],['background','background','背景']];entries.forEach(([oldKind,kind,label],i)=>{const created=lighting(uid(),(n.name+'・'+label).slice(0,60),Math.max(-100000,n.x-430-(i%2)*390),Math.min(100000,n.y+Math.floor(i/2)*540),kind),oldLight=n.lights[oldKind];created.settings[kind]={...created.settings[kind],...oldLight};if(['light','highlight'].includes(kind)&&oldLight.hemisphere===undefined)created.settings[kind].hemisphere=direction(oldLight)[2]<0?'back':'front';nodes.push(created);edges.push({from:created.id,to:n.id,slot:'bundle'});});}edges.push(...old.edges.map(e=>({from:e.from,to:e.to,slot:'bundle'})));return {version:5,nodes,edges,view:old.view,exportScale:old.exportScale};}
+function validate(data){if(data&&[1,2,3,4].includes(data.version))return validate(migrate(data));if(!data||data.version!==5||!Array.isArray(data.nodes)||!Array.isArray(data.edges)||data.nodes.length>1500||data.edges.length>5000)throw Error('未対応の形式か、ノード・接続数が上限を超えています。');const finite=(v,min,max)=>Number.isFinite(v)&&v>=min&&v<=max,ids=new Set();const nodes=data.nodes.map(n=>{
+ if(!n||typeof n.id!=='string'||!n.id||n.id.length>100||ids.has(n.id)||!['base','lighting','image','hub'].includes(n.type)||typeof n.name!=='string'||n.name.length>60||![n.x,n.y].every(v=>finite(v,-100000,100000)))throw Error('ノードの値が不正です。');ids.add(n.id);const out={id:n.id,type:n.type,name:n.name,x:n.x,y:n.y};
+ if(n.type==='lighting'){if(!kinds.includes(n.kind)||!n.settings)throw Error('照明の種類が不正です。');out.kind=n.kind;out.settings={};for(const kind of kinds){const l=n.settings[kind];if(!l||!isHex(l.color)||typeof l.enabled!=='boolean')throw Error('照明の設定が不正です。');const value={color:l.color.toUpperCase(),enabled:l.enabled};if(kind!=='background'){if(!finite(l.strength,0,1))throw Error('強度が不正です。');value.strength=l.strength;}if(['light','highlight'].includes(kind)){if(!finite(l.azimuth,0,360)||!finite(l.elevation,-90,90)||!['front','back'].includes(l.hemisphere))throw Error('方向が不正です。');Object.assign(value,{azimuth:l.azimuth,elevation:l.elevation,hemisphere:l.hemisphere});}out.settings[kind]=value;}}
+ else if(n.type==='base'){if(!isHex(n.color)||!['sphere','cube','flat','obj'].includes(n.shape)||!finite(n.rotation?.yaw,0,360)||!finite(n.rotation?.pitch,-90,90)||!finite(n.objectScale,.25,4)||!finite(n.initialRotation?.yaw,0,360)||!finite(n.initialRotation?.pitch,-90,90)||!Array.isArray(n.savedColors)||n.savedColors.length>32||!n.savedColors.every(isHex))throw Error('固有色・回転・倍率・保存色が不正です。');Object.assign(out,{color:n.color.toUpperCase(),shape:n.shape,rotation:{yaw:n.rotation.yaw,pitch:n.rotation.pitch},objectScale:n.objectScale,initialRotation:{yaw:n.initialRotation.yaw,pitch:n.initialRotation.pitch},savedColors:[...new Set(n.savedColors.map(c=>c.toUpperCase()))],obj:null});if(n.obj!==null){if(!n.obj||typeof n.obj.name!=='string'||n.obj.name.length>160||typeof n.obj.text!=='string')throw Error('OBJが不正です。');G.parseOBJ(n.obj.text);out.obj={name:n.obj.name,text:n.obj.text};}if(n.shape==='obj'&&!out.obj)throw Error('OBJ形状がありません。');}
+ else if(n.type==='image'){if(n.src!==null&&(typeof n.src!=='string'||n.src.length>2500000||!/^data:image\/(png|jpeg);base64,[a-zA-Z0-9+/=]+$/.test(n.src)))throw Error('画像データが不正です。');out.src=n.src;}
+ return out;});
+ const map=new Map(nodes.map(n=>[n.id,n])),pairs=new Set(),degree=new Map(nodes.map(n=>[n.id,0])),outgoing=new Map();const edges=data.edges.map(e=>{const a=map.get(e?.from),b=map.get(e?.to),key=JSON.stringify([e?.from,e?.to]);if(!a||!b||e.slot!=='bundle'||!['lighting','hub'].includes(a.type)||!['hub','base'].includes(b.type)||a.id===b.id||pairs.has(key))throw Error('接続が不正です。');pairs.add(key);degree.set(b.id,degree.get(b.id)+1);if(!outgoing.has(a.id))outgoing.set(a.id,[]);outgoing.get(a.id).push(b.id);return {from:a.id,to:b.id,slot:'bundle'};});const queue=nodes.filter(n=>degree.get(n.id)===0).map(n=>n.id);let visited=0;while(queue.length){const id=queue.pop();visited++;for(const target of outgoing.get(id)||[]){degree.set(target,degree.get(target)-1);if(degree.get(target)===0)queue.push(target);}}if(visited!==nodes.length)throw Error('循環接続のあるデータは読み込めません。');
+ const v=data.view;if(!v||!finite(v.x,-100000,100000)||!finite(v.y,-100000,100000)||!finite(v.scale,.25,2)||!finite(data.exportScale,.25,4))throw Error('表示・出力倍率が不正です。');return {version:5,nodes,edges,view:{x:v.x,y:v.y,scale:v.scale},exportScale:data.exportScale};}
+const api={kinds,labels,normalizeHex,isHex,channels,hex,angle,direction,defaultRotation,defaults,base,lighting,sample,canConnect,connectNodes,collectLights,source,backgroundColor,shader,gradientColor,removeNode,duplicateNode,validate};if(typeof module!=='undefined')module.exports=api;else root.ColorModel=api;
 })(globalThis);

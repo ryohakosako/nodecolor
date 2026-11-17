@@ -11,8 +11,8 @@ function measure(scene,{cardFor,portPoint,scale:requested=1}){
  if(!Number.isFinite(requested)||requested<.25||requested>4)throw Error('倍率は0.25〜4にしてください。');const scale=Math.min(requested,8192/Math.max(w,h),Math.sqrt(24000000/(w*h)));return {cards,minX,minY,w,h,scale,width:Math.ceil(w*scale),height:Math.ceil(h*scale)};
 }
 async function createCanvas(scene,options){await document.fonts.ready;const {cardFor,portPoint}=options,{cards,minX,minY,w,h,scale,width,height}=measure(scene,options),canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const ctx=canvas.getContext('2d');ctx.scale(scale,scale);ctx.translate(-minX,-minY);ctx.fillStyle='#17191e';ctx.fillRect(minX,minY,w,h);
- const palette={bundle:'#F4D199',key:'#F4D199',environment:'#8EB6E2',reflection:'#D99D8F',highlight:'#E4D8FA',background:'#9BBDB0'};
- for(const edge of scene.edges){const a=portPoint(edge.from,'output',edge.slot),b=portPoint(edge.to,'input',edge.slot);if(!a||!b)continue;const bend=Math.max(60,Math.abs(b.x-a.x)/2);ctx.strokeStyle=palette[edge.slot];ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.bezierCurveTo(a.x+bend,a.y,b.x-bend,b.y,b.x,b.y);ctx.stroke();}
+ const palette={light:'#F4D199',hub:'#85CCB8',bundle:'#F4D199',key:'#F4D199',environment:'#8EB6E2',reflection:'#D99D8F',highlight:'#E4D8FA',background:'#9BBDB0'};
+ for(const edge of scene.edges){const a=portPoint(edge.from,'output',edge.slot),b=portPoint(edge.to,'input',edge.slot);if(!a||!b)continue;const bend=Math.max(60,Math.abs(b.x-a.x)/2);const source=scene.nodes.find(n=>n.id===edge.from);ctx.strokeStyle=palette[source?.type==='lighting'?source.kind:'hub']||palette.bundle;ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.bezierCurveTo(a.x+bend,a.y,b.x-bend,b.y,b.x,b.y);ctx.stroke();}
  for(const {node,card}of cards){
   const rect=card.getBoundingClientRect(),unit=scene.view.scale;ctx.fillStyle='#24272f';ctx.strokeStyle='#474d5d';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect(node.x,node.y,card.offsetWidth,card.offsetHeight,10);ctx.fill();ctx.stroke();
   for(const element of card.querySelectorAll('*')){
